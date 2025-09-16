@@ -1,7 +1,5 @@
-
-
-// Simple in-memory cache for latest rates
-const latestRates = {};
+// Next.js App Router API route (Edge runtime)
+export const runtime = "edge";
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -11,15 +9,15 @@ const corsHeaders = {
   'Content-Type': 'application/json',
 };
 
+// Handle CORS preflight
 export async function OPTIONS() {
-  // Respond to CORS preflight
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
+// Main GET handler
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    // Accept either symbol (e.g., BTCUSDT) or from/to (e.g., USDT,THB)
     const symbolParam = searchParams.get('symbol');
     let symbol = symbolParam;
 
@@ -28,20 +26,30 @@ export async function GET(request) {
 
     if (!symbol) {
       if (!from || !to) {
-        return new Response(JSON.stringify({ error: 'Provide symbol or from and to params' }), { status: 400, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: 'Provide symbol or from/to params' }), {
+          status: 400,
+          headers: corsHeaders,
+        });
       }
       symbol = `${from}${to}`;
     }
 
-    // Try common variants
-    const candidates = [symbol, `${symbol}USDT`, `${symbol}BUSD`, symbol.replace('USDT', ''), symbol.replace('BUSD', '')];
+    // Try common variants for Binance
+    const candidates = [
+      symbol,
+      `${symbol}USDT`,
+      `${symbol}BUSD`,
+      symbol.replace('USDT', ''),
+      symbol.replace('BUSD', ''),
+    ];
 
     let data = null;
     for (const cand of candidates) {
       if (!cand) continue;
       try {
         const url = `https://api.binance.com/api/v3/ticker/price?symbol=${cand}`;
-        const res = await fetch(url);
+        // fetch ใน Edge runtime ใช้ built-in fetch ได้เลย
+        const res = await fetch(url, { cache: "no-store" });
         if (res.ok) {
           const json = await res.json();
           if (json && json.price) {
@@ -50,19 +58,22 @@ export async function GET(request) {
           }
         }
       } catch (e) {
-        // ignore and try next
+        // ignore fetch error, try next candidate
       }
     }
 
     if (!data) {
-      return new Response(JSON.stringify({ error: 'Price not found for symbol' }), { status: 404, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'Price not found for symbol' }), {
+        status: 404,
+        headers: corsHeaders,
+      });
     }
 
-    // Save latest rate in cache
-    latestRates[data.symbol] = { price: data.price, timestamp: Date.now() };
-
-    return new Response(JSON.stringify({ symbol: data.symbol, price: data.price }), { status: 200, headers: corsHeaders });
+    return new Response(JSON.stringify(data), { status: 200, headers: corsHeaders });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
 }
